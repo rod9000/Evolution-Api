@@ -382,6 +382,13 @@ export class BaileysStartupService extends ChannelStartupService {
   }
 
   private async connectionUpdate({ qr, connection, lastDisconnect }: Partial<ConnectionState>) {
+    // If the instance is being deleted or the session is ending, do not process
+    // any connection update — logoutInstance() already set the final state.
+    if (this.isDeleting || this.endSession) {
+      this.logger.info('connectionUpdate skipped — instance is being deleted/ended');
+      return;
+    }
+
     // Enhanced logging for connection updates
     const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
     this.logger.info({
@@ -486,12 +493,6 @@ export class BaileysStartupService extends ChannelStartupService {
     }
 
     if (connection === 'close') {
-      // Check if instance is being deleted or session is ending
-      if (this.isDeleting || this.endSession) {
-        this.logger.info('Instance is being deleted/ended, skipping reconnection attempt');
-        return;
-      }
-
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       // 408 = request timeout — added per #2501 to avoid reconnect loops on
       // transient network drops where the server returned a 408 in the close.
@@ -2103,11 +2104,6 @@ export class BaileysStartupService extends ChannelStartupService {
     this.client.ev.process(async (events) => {
       this.eventProcessingQueue = this.eventProcessingQueue.then(async () => {
         try {
-          // Process connection.update outside endSession check to ensure state is always updated
-          if (events['connection.update']) {
-            this.connectionUpdate(events['connection.update']);
-          }
-
           if (!this.endSession) {
             const database = this.configService.get<Database>('DATABASE');
             const settings = await this.findSettings();
@@ -2129,6 +2125,10 @@ export class BaileysStartupService extends ChannelStartupService {
               }
 
               this.sendDataWebhook(Events.CALL, call);
+            }
+
+            if (events['connection.update']) {
+              this.connectionUpdate(events['connection.update']);
             }
 
             if (events['creds.update']) {

@@ -438,6 +438,15 @@ export class WAMonitoringService {
 
         this.waInstances[instanceName].instance.qrcode = { count: 0 };
         this.waInstances[instanceName].stateConnection.state = 'close';
+
+        // Update DB to reflect disconnection
+        const instanceDbId = this.waInstances[instanceName]?.instanceId;
+        if (instanceDbId) {
+          await this.prismaRepository.instance.update({
+            where: { id: instanceDbId },
+            data: { connectionStatus: 'close' },
+          });
+        }
       } catch (error) {
         this.logger.error({
           localError: 'noConnection',

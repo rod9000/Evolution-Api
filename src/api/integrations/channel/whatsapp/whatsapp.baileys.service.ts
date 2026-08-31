@@ -516,6 +516,17 @@ export class BaileysStartupService extends ChannelStartupService {
       });
 
       if (shouldReconnect) {
+        // Update DB to reflect disconnection before attempting reconnection
+        await this.prismaRepository.instance.update({
+          where: { id: this.instanceId },
+          data: {
+            connectionStatus: 'close',
+            disconnectionAt: new Date(),
+            disconnectionReasonCode: statusCode,
+            disconnectionObject: JSON.stringify(lastDisconnect),
+          },
+        });
+
         // Add 3 second delay before reconnection to prevent rapid reconnection loops
         this.logger.info('Reconnecting in 3 seconds...');
         setTimeout(async () => {
@@ -2092,6 +2103,11 @@ export class BaileysStartupService extends ChannelStartupService {
     this.client.ev.process(async (events) => {
       this.eventProcessingQueue = this.eventProcessingQueue.then(async () => {
         try {
+          // Process connection.update outside endSession check to ensure state is always updated
+          if (events['connection.update']) {
+            this.connectionUpdate(events['connection.update']);
+          }
+
           if (!this.endSession) {
             const database = this.configService.get<Database>('DATABASE');
             const settings = await this.findSettings();
@@ -2113,10 +2129,6 @@ export class BaileysStartupService extends ChannelStartupService {
               }
 
               this.sendDataWebhook(Events.CALL, call);
-            }
-
-            if (events['connection.update']) {
-              this.connectionUpdate(events['connection.update']);
             }
 
             if (events['creds.update']) {
